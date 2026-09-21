@@ -15,6 +15,16 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    build: .
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://simpandulu:simpandulu@postgres:5432/simpandulu
+    command: ["node", "dist/db/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: .
     environment:
@@ -28,8 +38,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -39,6 +49,23 @@ services:
           "fetch('http://localhost:3000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres-test:
+    profiles: [test]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: simpandulu_test
+      POSTGRES_USER: simpandulu
+      POSTGRES_PASSWORD: simpandulu
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U simpandulu -d simpandulu_test"]
+      interval: 2s
       timeout: 3s
       retries: 10
 
