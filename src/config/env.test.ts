@@ -6,6 +6,7 @@ const validEnvironment = {
   PORT: "3000",
   DATABASE_URL: "postgresql://user:password@localhost:5432/simpandulu_test",
   CORS_ORIGIN: "http://localhost:5173",
+  ACCESS_TOKEN_SECRET: "test-access-token-secret-at-least-32-characters",
 };
 
 describe("parseEnvironment", () => {
@@ -15,6 +16,8 @@ describe("parseEnvironment", () => {
       PORT: 3000,
       LOG_LEVEL: "info",
       DATABASE_MAX_CONNECTIONS: 10,
+      ACCESS_TOKEN_TTL_SECONDS: 900,
+      REFRESH_TOKEN_TTL_DAYS: 30,
     });
   });
 

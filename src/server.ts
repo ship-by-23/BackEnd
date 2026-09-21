@@ -1,10 +1,11 @@
 import "dotenv/config";
 import { createServer } from "node:http";
-import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { createApp } from "./app.js";
 import { parseEnvironment } from "./config/env.js";
+import { createDatabase } from "./db/client.js";
 import { createLogger } from "./lib/logger.js";
+import { createAuthRouter } from "./modules/auth/auth.routes.js";
 
 const config = parseEnvironment(process.env);
 const logger = createLogger(config);
@@ -13,11 +14,12 @@ const pool = new Pool({
   max: config.DATABASE_MAX_CONNECTIONS,
 });
 
-export const db = drizzle(pool);
+const database = createDatabase(pool);
 
 const app = createApp({
   config,
   logger,
+  apiRouter: createAuthRouter(database, config),
   checkDatabase: async () => {
     await pool.query("select 1");
   },

@@ -26,6 +26,18 @@ const environmentSchema = z.object({
   CORS_ORIGIN: z.url(),
   LOG_LEVEL: z.enum(logLevels).default("info"),
   DATABASE_MAX_CONNECTIONS: z.coerce.number().int().min(1).max(100).default(10),
+  ACCESS_TOKEN_SECRET: z.string().min(32),
+  ACCESS_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(3_600)
+    .default(900),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
+  JWT_ISSUER: z.string().min(1).default("simpandulu-api"),
+  JWT_AUDIENCE: z.string().min(1).default("simpandulu-web"),
+  BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(14).default(12),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(20),
   SHUTDOWN_TIMEOUT_MS: z.coerce
     .number()
     .int()

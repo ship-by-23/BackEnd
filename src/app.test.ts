@@ -11,6 +11,13 @@ const config: AppConfig = {
   CORS_ORIGIN: "http://localhost:5173",
   LOG_LEVEL: "silent",
   DATABASE_MAX_CONNECTIONS: 10,
+  ACCESS_TOKEN_SECRET: "test-access-token-secret-at-least-32-characters",
+  ACCESS_TOKEN_TTL_SECONDS: 900,
+  REFRESH_TOKEN_TTL_DAYS: 30,
+  JWT_ISSUER: "simpandulu-api",
+  JWT_AUDIENCE: "simpandulu-web",
+  BCRYPT_ROUNDS: 10,
+  AUTH_RATE_LIMIT_MAX: 1_000,
   SHUTDOWN_TIMEOUT_MS: 10_000,
 };
 

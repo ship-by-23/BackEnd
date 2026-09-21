@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import cors from "cors";
-import express, { type Express } from "express";
+import express, { type Express, type Router } from "express";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import type { Logger } from "pino";
@@ -11,12 +11,14 @@ export type AppDependencies = {
   config: AppConfig;
   logger: Logger;
   checkDatabase: () => Promise<void>;
+  apiRouter?: Router;
 };
 
 export function createApp({
   config,
   logger,
   checkDatabase,
+  apiRouter,
 }: AppDependencies): Express {
   const app = express();
 
@@ -51,6 +53,8 @@ export function createApp({
       response.status(503).json({ status: "unavailable" });
     }
   });
+
+  if (apiRouter) app.use("/api/v1", apiRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
