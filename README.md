@@ -40,4 +40,22 @@ npm test
 npm run build
 ```
 
-Database tables and migrations are introduced in the next milestone.
+## Database
+
+Apply migrations with:
+
+```bash
+npm run db:migrate
+```
+
+Run database integration tests against the isolated test service:
+
+```bash
+docker compose --profile test up postgres-test --detach --wait
+TEST_DATABASE_URL=postgresql://simpandulu:simpandulu@localhost:5433/simpandulu_test npm run test:integration
+docker compose --profile test down
+```
+
+The optional development administrator seed requires `SEED_ADMIN_EMAIL` and an
+already-hashed bcrypt value in `SEED_ADMIN_PASSWORD_HASH`. It refuses to run when
+`NODE_ENV=production`.

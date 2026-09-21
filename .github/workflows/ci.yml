@@ -16,6 +16,22 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: simpandulu_test
+          POSTGRES_USER: simpandulu
+          POSTGRES_PASSWORD: simpandulu
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U simpandulu -d simpandulu_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://simpandulu:simpandulu@localhost:5432/simpandulu_test
 
     steps:
       - name: Check out repository

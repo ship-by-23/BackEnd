@@ -1,5 +1,6 @@
 dist/
 coverage/
 node_modules/
+drizzle/meta/
 docs/
 *.pdf

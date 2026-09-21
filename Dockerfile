@@ -15,6 +15,7 @@ RUN addgroup -S nodejs && adduser -S simpandulu -G nodejs
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build --chown=simpandulu:nodejs /app/dist ./dist
+COPY --chown=simpandulu:nodejs drizzle ./drizzle
 USER simpandulu
 EXPOSE 3000
 CMD ["node", "dist/server.js"]
