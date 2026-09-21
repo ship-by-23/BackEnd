@@ -38,12 +38,37 @@ const environmentSchema = z.object({
   JWT_AUDIENCE: z.string().min(1).default("simpandulu-web"),
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(14).default(12),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(20),
+  EXTRACTION_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(60_000)
+    .default(15_000),
+  EXTRACTION_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(10_000)
+    .max(10_000_000)
+    .default(2_000_000),
+  EXTRACTION_MAX_REDIRECTS: z.coerce.number().int().min(0).max(10).default(5),
+  EXTRACTION_POLL_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(100)
+    .max(10_000)
+    .default(500),
+  EXTRACTION_STALE_LOCK_MS: z.coerce
+    .number()
+    .int()
+    .min(10_000)
+    .max(3_600_000)
+    .default(300_000),
   SHUTDOWN_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .min(1_000)
     .max(60_000)
-    .default(10_000),
+    .default(20_000),
 });
 
 export type AppConfig = z.infer<typeof environmentSchema>;
