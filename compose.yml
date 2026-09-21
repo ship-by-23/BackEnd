@@ -35,6 +35,13 @@ services:
       LOG_LEVEL: info
       DATABASE_MAX_CONNECTIONS: 10
       SHUTDOWN_TIMEOUT_MS: 10000
+      ACCESS_TOKEN_SECRET: local-development-access-token-secret-change-me
+      ACCESS_TOKEN_TTL_SECONDS: 900
+      REFRESH_TOKEN_TTL_DAYS: 30
+      JWT_ISSUER: simpandulu-api
+      JWT_AUDIENCE: simpandulu-web
+      BCRYPT_ROUNDS: 12
+      AUTH_RATE_LIMIT_MAX: 20
     ports:
       - "3000:3000"
     depends_on:

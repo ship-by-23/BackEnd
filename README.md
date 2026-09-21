@@ -24,6 +24,15 @@ docker compose up postgres -d
 The API listens on `http://localhost:3000`. Health endpoints are available at
 `/health/live` and `/health/ready`.
 
+Authentication endpoints are available under `/api/v1`:
+
+- `POST /auth/register`, `/auth/login`, `/auth/refresh`, and `/auth/logout`
+- `GET /me` and `PATCH /me`
+- `PUT /me/password`
+
+Access tokens are returned in JSON and sent as `Authorization: Bearer <token>`.
+Refresh tokens are rotating HTTP-only cookies and are never returned in JSON.
+
 ## Docker
 
 ```bash

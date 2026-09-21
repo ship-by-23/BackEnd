@@ -12,10 +12,12 @@ export const errorHandler: ErrorRequestHandler = (
   _next,
 ) => {
   if (error instanceof AppError) {
+    const fields = error.fields ? { fields: error.fields } : {};
     response.status(error.statusCode).json({
       error: {
         code: error.code,
         message: error.message,
+        ...fields,
       },
     });
     return;
