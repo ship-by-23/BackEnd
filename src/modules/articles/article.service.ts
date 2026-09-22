@@ -1,4 +1,14 @@
-import { and, eq, inArray } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  exists,
+  inArray,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { DatabaseError } from "pg";
 import type { Database } from "../../db/client.js";
 import {
@@ -16,6 +26,51 @@ export type CreateArticleInput = {
   tagIds: string[];
 };
 
+export type ListArticlesInput = {
+  page: number;
+  pageSize: number;
+  status?: "unread" | "reading" | "finished" | undefined;
+  tagId?: string | undefined;
+  favorite?: boolean | undefined;
+  archived: boolean;
+  sort: "createdAt" | "updatedAt" | "title" | "readingProgress";
+  order: "asc" | "desc";
+};
+
+export type UpdateArticleInput = {
+  readingStatus?: "unread" | "reading" | "finished" | undefined;
+  isFavorite?: boolean | undefined;
+  isArchived?: boolean | undefined;
+};
+
+export type UpdateProgressInput = {
+  progress: number;
+  anchor?: string | null | undefined;
+};
+
+const articleSummary = {
+  id: articles.id,
+  submittedUrl: articles.submittedUrl,
+  canonicalUrl: articles.canonicalUrl,
+  title: articles.title,
+  description: articles.description,
+  siteName: articles.siteName,
+  author: articles.author,
+  publishedAt: articles.publishedAt,
+  imageUrl: articles.imageUrl,
+  wordCount: articles.wordCount,
+  estimatedReadingMinutes: articles.estimatedReadingMinutes,
+  readingStatus: articles.readingStatus,
+  readingProgress: articles.readingProgress,
+  isFavorite: articles.isFavorite,
+  isArchived: articles.isArchived,
+  extractionStatus: articles.extractionStatus,
+  extractionErrorCode: articles.extractionErrorCode,
+  createdAt: articles.createdAt,
+  updatedAt: articles.updatedAt,
+  finishedAt: articles.finishedAt,
+};
+
 function databaseErrorCode(error: unknown): string | undefined {
   if (error instanceof DatabaseError) return error.code;
   if (error instanceof Error && error.cause)
@@ -28,6 +83,55 @@ export class ArticleService {
     private readonly database: Database,
     private readonly allowNonStandardPorts = false,
   ) {}
+
+  async list(userId: string, input: ListArticlesInput) {
+    const conditions: SQL[] = [
+      eq(articles.userId, userId),
+      eq(articles.isArchived, input.archived),
+    ];
+    if (input.status) conditions.push(eq(articles.readingStatus, input.status));
+    if (input.favorite !== undefined)
+      conditions.push(eq(articles.isFavorite, input.favorite));
+    if (input.tagId)
+      conditions.push(
+        exists(
+          this.database
+            .select({ id: articleTags.articleId })
+            .from(articleTags)
+            .where(
+              and(
+                eq(articleTags.articleId, articles.id),
+                eq(articleTags.userId, userId),
+                eq(articleTags.tagId, input.tagId),
+              ),
+            ),
+        ),
+      );
+
+    const where = and(...conditions);
+    const sortColumn = articles[input.sort];
+    const sort = input.order === "asc" ? asc : desc;
+    const [items, [total]] = await Promise.all([
+      this.database
+        .select(articleSummary)
+        .from(articles)
+        .where(where)
+        .orderBy(sort(sortColumn), desc(articles.id))
+        .limit(input.pageSize)
+        .offset((input.page - 1) * input.pageSize),
+      this.database.select({ value: count() }).from(articles).where(where),
+    ]);
+    const totalItems = total?.value ?? 0;
+    return {
+      data: items,
+      pagination: {
+        page: input.page,
+        pageSize: input.pageSize,
+        totalItems,
+        totalPages: Math.ceil(totalItems / input.pageSize),
+      },
+    };
+  }
 
   async create(userId: string, input: CreateArticleInput) {
     let url: URL;
@@ -130,6 +234,79 @@ export class ArticleService {
         "The article was not found.",
       );
     return article;
+  }
+
+  async update(userId: string, articleId: string, input: UpdateArticleInput) {
+    const [article] = await this.database
+      .update(articles)
+      .set({
+        ...(input.isFavorite !== undefined && { isFavorite: input.isFavorite }),
+        ...(input.isArchived !== undefined && { isArchived: input.isArchived }),
+        ...(input.readingStatus && {
+          readingStatus: input.readingStatus,
+          readingProgress:
+            input.readingStatus === "finished"
+              ? 100
+              : input.readingStatus === "unread"
+                ? 0
+                : sql`least(${articles.readingProgress}, 99)`,
+          finishedAt:
+            input.readingStatus === "finished"
+              ? sql`coalesce(${articles.finishedAt}, now())`
+              : null,
+        }),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(articles.id, articleId), eq(articles.userId, userId)))
+      .returning();
+    if (!article)
+      throw new AppError(
+        404,
+        "ARTICLE_NOT_FOUND",
+        "The article was not found.",
+      );
+    return article;
+  }
+
+  async updateProgress(
+    userId: string,
+    articleId: string,
+    input: UpdateProgressInput,
+  ) {
+    const [article] = await this.database
+      .update(articles)
+      .set({
+        readingProgress: input.progress,
+        readingStatus: input.progress === 100 ? "finished" : "reading",
+        finishedAt:
+          input.progress === 100
+            ? sql`coalesce(${articles.finishedAt}, now())`
+            : null,
+        ...(input.anchor !== undefined && { readingAnchor: input.anchor }),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(articles.id, articleId), eq(articles.userId, userId)))
+      .returning();
+    if (!article)
+      throw new AppError(
+        404,
+        "ARTICLE_NOT_FOUND",
+        "The article was not found.",
+      );
+    return article;
+  }
+
+  async delete(userId: string, articleId: string) {
+    const [article] = await this.database
+      .delete(articles)
+      .where(and(eq(articles.id, articleId), eq(articles.userId, userId)))
+      .returning({ id: articles.id });
+    if (!article)
+      throw new AppError(
+        404,
+        "ARTICLE_NOT_FOUND",
+        "The article was not found.",
+      );
   }
 
   async retry(userId: string, articleId: string) {

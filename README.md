@@ -36,7 +36,14 @@ Refresh tokens are rotating HTTP-only cookies and are never returned in JSON.
 Article ingestion endpoints are also under `/api/v1`:
 
 - `POST /articles` queues a URL and returns `202 Accepted`.
+- `GET /articles` lists owned article summaries with pagination and optional
+  `status`, `tagId`, `favorite`, `archived`, `sort`, and `order` filters. The
+  default is unarchived, newest-first; `pageSize` is capped at 100.
 - `GET /articles/:articleId` returns owned article content and extraction state.
+- `PATCH /articles/:articleId` updates reading status, favorite, or archive state.
+- `PUT /articles/:articleId/progress` saves a 0–100 progress value and optional
+  reading anchor; reaching 100 marks the article finished.
+- `DELETE /articles/:articleId` removes an owned article and dependent records.
 - `POST /articles/:articleId/retry` requeues a failed extraction.
 
 The in-process worker claims durable PostgreSQL jobs, validates and pins every
