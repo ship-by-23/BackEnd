@@ -384,6 +384,200 @@ describeWithDatabase("article extraction API", () => {
     expect(job.rowCount).toBe(0);
   });
 
+  it("normalizes tags, attaches them idempotently, and preserves articles on deletion", async () => {
+    const ownerToken = await register("owner@example.com");
+    const otherToken = await register("other@example.com");
+    const created = await request(app)
+      .post("/api/v1/articles")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ url: fixtureUrl("/tagged") });
+    const articleId = articleResponseSchema.parse(created.body as unknown).data
+      .id;
+    const tag = await request(app)
+      .post("/api/v1/tags")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ name: "  Research  " });
+    expect(tag.status).toBe(201);
+    const tagId = z
+      .object({ data: z.object({ id: z.uuid(), name: z.string() }) })
+      .parse(tag.body as unknown).data.id;
+    expect(tag.body).toMatchObject({ data: { name: "Research" } });
+    const duplicate = await request(app)
+      .post("/api/v1/tags")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ name: "research" });
+    expect(duplicate.status).toBe(409);
+    const association = `/api/v1/articles/${articleId}/tags/${tagId}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(
+        (
+          await request(app)
+            .put(association)
+            .set("Authorization", `Bearer ${ownerToken}`)
+        ).status,
+      ).toBe(204);
+    }
+    const links = await pool.query(
+      "select article_id from article_tags where article_id = $1",
+      [articleId],
+    );
+    expect(links.rowCount).toBe(1);
+    expect(
+      (
+        await request(app)
+          .put(association)
+          .set("Authorization", `Bearer ${otherToken}`)
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(app)
+          .delete(`/api/v1/tags/${tagId}`)
+          .set("Authorization", `Bearer ${otherToken}`)
+      ).status,
+    ).toBe(404);
+    const renamed = await request(app)
+      .patch(`/api/v1/tags/${tagId}`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ name: "Reading" });
+    expect(renamed.body).toMatchObject({ data: { name: "Reading" } });
+    const list = await request(app)
+      .get("/api/v1/tags")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(list.body).toMatchObject({
+      data: [{ id: tagId }],
+      pagination: { totalItems: 1 },
+    });
+    expect(
+      (
+        await request(app)
+          .delete(`/api/v1/tags/${tagId}`)
+          .set("Authorization", `Bearer ${ownerToken}`)
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await request(app)
+          .get(`/api/v1/articles/${articleId}`)
+          .set("Authorization", `Bearer ${ownerToken}`)
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await pool.query(
+          "select article_id from article_tags where article_id = $1",
+          [articleId],
+        )
+      ).rowCount,
+    ).toBe(0);
+  });
+
+  it("creates, lists, edits, and deletes highlights without cross-user access", async () => {
+    const ownerToken = await register("owner@example.com");
+    const otherToken = await register("other@example.com");
+    const created = await request(app)
+      .post("/api/v1/articles")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ url: fixtureUrl("/highlighted") });
+    const articleId = articleResponseSchema.parse(created.body as unknown).data
+      .id;
+    const articlePath = `/api/v1/articles/${articleId}/highlights`;
+    expect(
+      (
+        await request(app)
+          .post(articlePath)
+          .set("Authorization", `Bearer ${otherToken}`)
+          .send({ quote: "Private" })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(app)
+          .post(articlePath)
+          .set("Authorization", `Bearer ${ownerToken}`)
+          .send({ quote: "Quote", startOffset: 5 })
+      ).status,
+    ).toBe(400);
+    const createdHighlight = await request(app)
+      .post(articlePath)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({
+        quote: "  Selected sentence  ",
+        prefix: "before",
+        suffix: "after",
+        startOffset: 10,
+        endOffset: 27,
+        note: "Initial note",
+      });
+    expect(createdHighlight.status).toBe(201);
+    const highlightId = z
+      .object({ data: z.object({ id: z.uuid() }) })
+      .parse(createdHighlight.body as unknown).data.id;
+    const highlightPath = `/api/v1/highlights/${highlightId}`;
+    expect(createdHighlight.body).toMatchObject({
+      data: { quote: "Selected sentence", note: "Initial note" },
+    });
+    const all = await request(app)
+      .get("/api/v1/highlights")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(all.body).toMatchObject({
+      data: [{ id: highlightId }],
+      pagination: { totalItems: 1 },
+    });
+    const perArticle = await request(app)
+      .get(articlePath)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(perArticle.body).toMatchObject({ data: [{ id: highlightId }] });
+    expect(
+      (
+        await request(app)
+          .get(articlePath)
+          .set("Authorization", `Bearer ${otherToken}`)
+      ).status,
+    ).toBe(404);
+    const isolated = await request(app)
+      .get("/api/v1/highlights")
+      .set("Authorization", `Bearer ${otherToken}`);
+    expect(isolated.body).toMatchObject({
+      data: [],
+      pagination: { totalItems: 0 },
+    });
+    expect(
+      (
+        await request(app)
+          .patch(highlightPath)
+          .set("Authorization", `Bearer ${otherToken}`)
+          .send({ note: "Stolen" })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(app)
+          .delete(highlightPath)
+          .set("Authorization", `Bearer ${otherToken}`)
+      ).status,
+    ).toBe(404);
+    const updated = await request(app)
+      .patch(highlightPath)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ note: "Updated note" });
+    expect(updated.body).toMatchObject({ data: { note: "Updated note" } });
+    expect(
+      (
+        await request(app)
+          .delete(highlightPath)
+          .set("Authorization", `Bearer ${ownerToken}`)
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await request(app)
+          .get(articlePath)
+          .set("Authorization", `Bearer ${ownerToken}`)
+      ).body,
+    ).toMatchObject({ data: [] });
+  });
+
   it("stores safe failure codes and retries idempotently", async () => {
     const accessToken = await register("owner@example.com");
     const create = await request(app)
