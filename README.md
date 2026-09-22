@@ -51,6 +51,12 @@ network destination, follows only validated redirects, extracts readable content
 and sanitizes HTML before storage. Failed submissions remain visible with a stable
 error code.
 
+Organization endpoints under `/api/v1` let authenticated users create, list,
+rename, and delete tags; attach or detach tags at
+`/articles/:articleId/tags/:tagId`; and create, list, update notes on, and
+delete highlights. Highlights can be listed across the library or for one
+article. Tag and highlight lists are paginated.
+
 ## Docker
 
 ```bash
