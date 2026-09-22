@@ -33,6 +33,17 @@ Authentication endpoints are available under `/api/v1`:
 Access tokens are returned in JSON and sent as `Authorization: Bearer <token>`.
 Refresh tokens are rotating HTTP-only cookies and are never returned in JSON.
 
+Article ingestion endpoints are also under `/api/v1`:
+
+- `POST /articles` queues a URL and returns `202 Accepted`.
+- `GET /articles/:articleId` returns owned article content and extraction state.
+- `POST /articles/:articleId/retry` requeues a failed extraction.
+
+The in-process worker claims durable PostgreSQL jobs, validates and pins every
+network destination, follows only validated redirects, extracts readable content,
+and sanitizes HTML before storage. Failed submissions remain visible with a stable
+error code.
+
 ## Docker
 
 ```bash
