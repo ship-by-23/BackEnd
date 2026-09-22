@@ -18,6 +18,44 @@ const createArticleSchema = z
   });
 
 const articleParamsSchema = z.object({ articleId: z.uuid() });
+const updateArticleSchema = z
+  .object({
+    readingStatus: z.enum(["unread", "reading", "finished"]).optional(),
+    isFavorite: z.boolean().optional(),
+    isArchived: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    "At least one field is required.",
+  );
+const progressSchema = z
+  .object({
+    progress: z.number().int().min(0).max(100),
+    anchor: z.string().max(2_048).nullable().optional(),
+  })
+  .strict();
+
+const listArticlesSchema = z
+  .object({
+    page: z.coerce.number().int().min(1).max(1_000_000).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
+    status: z.enum(["unread", "reading", "finished"]).optional(),
+    tagId: z.uuid().optional(),
+    favorite: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
+    archived: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .default(false),
+    sort: z
+      .enum(["createdAt", "updatedAt", "title", "readingProgress"])
+      .default("createdAt"),
+    order: z.enum(["asc", "desc"]).default("desc"),
+  })
+  .strict();
 
 type Article = Awaited<ReturnType<ArticleService["get"]>>;
 
@@ -97,10 +135,43 @@ export function createArticleRouter(
     });
   });
 
+  router.get("/articles", async (request, response) => {
+    const input = parse(listArticlesSchema, request.query);
+    response.json(await service.list(requireUserId(request), input));
+  });
+
   router.get("/articles/:articleId", async (request, response) => {
     const { articleId } = parse(articleParamsSchema, request.params as unknown);
     const article = await service.get(requireUserId(request), articleId);
     response.json({ data: articleDetail(article) });
+  });
+
+  router.patch("/articles/:articleId", async (request, response) => {
+    const { articleId } = parse(articleParamsSchema, request.params as unknown);
+    const input = parse(updateArticleSchema, request.body as unknown);
+    const article = await service.update(
+      requireUserId(request),
+      articleId,
+      input,
+    );
+    response.json({ data: articleDetail(article) });
+  });
+
+  router.put("/articles/:articleId/progress", async (request, response) => {
+    const { articleId } = parse(articleParamsSchema, request.params as unknown);
+    const input = parse(progressSchema, request.body as unknown);
+    const article = await service.updateProgress(
+      requireUserId(request),
+      articleId,
+      input,
+    );
+    response.json({ data: articleDetail(article) });
+  });
+
+  router.delete("/articles/:articleId", async (request, response) => {
+    const { articleId } = parse(articleParamsSchema, request.params as unknown);
+    await service.delete(requireUserId(request), articleId);
+    response.status(204).end();
   });
 
   router.post("/articles/:articleId/retry", async (request, response) => {

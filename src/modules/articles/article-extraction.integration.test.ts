@@ -182,6 +182,208 @@ describeWithDatabase("article extraction API", () => {
     expect(crossUser.status).toBe(404);
   });
 
+  it("lists only owned article summaries with combined filters and pagination", async () => {
+    const ownerToken = await register("owner@example.com");
+    const otherToken = await register("other@example.com");
+    const create = async (token: string, path: string) => {
+      const response = await request(app)
+        .post("/api/v1/articles")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ url: fixtureUrl(path) });
+      expect(response.status).toBe(202);
+      return articleResponseSchema.parse(response.body as unknown).data.id;
+    };
+    const firstId = await create(ownerToken, "/first");
+    const secondId = await create(ownerToken, "/second");
+    const archivedId = await create(ownerToken, "/archived");
+    const otherId = await create(otherToken, "/other");
+    await pool.query(
+      `update articles set title = case id
+         when $1::uuid then 'Alpha' when $2::uuid then 'Beta' else 'Hidden' end,
+         reading_status = (case when id = $2::uuid then 'reading' else 'unread' end)::reading_status,
+         is_favorite = id = $2::uuid, is_archived = id = $3::uuid,
+         content_html = '<p>private reader content</p>', content_text = 'private reader content'
+       where id in ($1::uuid, $2::uuid, $3::uuid)`,
+      [firstId, secondId, archivedId],
+    );
+    const owner = await pool.query<{ user_id: string }>(
+      "select user_id from articles where id = $1",
+      [firstId],
+    );
+    const tag = await pool.query<{ id: string }>(
+      "insert into tags (user_id, name, normalized_name) values ($1, 'Read', 'read') returning id",
+      [owner.rows[0]?.user_id],
+    );
+    const tagId = tag.rows[0]?.id;
+    if (!tagId) throw new Error("Expected tag to be created");
+    await pool.query(
+      "insert into article_tags (article_id, tag_id, user_id) values ($1, $2, $3)",
+      [secondId, tagId, owner.rows[0]?.user_id],
+    );
+
+    const page = await request(app)
+      .get("/api/v1/articles?page=1&pageSize=1&sort=title&order=asc")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(page.status).toBe(200);
+    expect(page.body).toMatchObject({
+      data: [{ id: firstId, title: "Alpha" }],
+      pagination: { page: 1, pageSize: 1, totalItems: 2, totalPages: 2 },
+    });
+    expect(JSON.stringify(page.body)).not.toContain("private reader content");
+    const pageData = z
+      .object({ data: z.array(z.object({ id: z.uuid() })) })
+      .parse(page.body as unknown).data;
+    expect(pageData[0]).not.toHaveProperty("contentHtml");
+    expect(pageData[0]).not.toHaveProperty("contentText");
+    expect(pageData[0]).not.toHaveProperty("userId");
+
+    const filtered = await request(app)
+      .get(`/api/v1/articles?status=reading&favorite=true&tagId=${tagId}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(filtered.body).toMatchObject({
+      data: [{ id: secondId }],
+      pagination: { totalItems: 1, totalPages: 1 },
+    });
+    const archived = await request(app)
+      .get("/api/v1/articles?archived=true")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(archived.body).toMatchObject({ data: [{ id: archivedId }] });
+    const empty = await request(app)
+      .get("/api/v1/articles?page=3&pageSize=1")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(empty.body).toMatchObject({
+      data: [],
+      pagination: { page: 3, pageSize: 1, totalItems: 2, totalPages: 2 },
+    });
+    const isolated = await request(app)
+      .get("/api/v1/articles")
+      .set("Authorization", `Bearer ${otherToken}`);
+    expect(isolated.body).toMatchObject({
+      data: [{ id: otherId }],
+      pagination: { totalItems: 1 },
+    });
+  });
+
+  it("validates library query parameters and requires authentication", async () => {
+    const token = await register("owner@example.com");
+    for (const query of [
+      "page=0",
+      "pageSize=101",
+      "favorite=yes",
+      "sort=invalid",
+      "tagId=bad",
+    ]) {
+      const response = await request(app)
+        .get(`/api/v1/articles?${query}`)
+        .set("Authorization", `Bearer ${token}`);
+      expect(response.status).toBe(400);
+      expect(response.body).toMatchObject({
+        error: { code: "VALIDATION_ERROR" },
+      });
+    }
+    expect((await request(app).get("/api/v1/articles")).status).toBe(401);
+  });
+
+  it("updates and deletes only owned articles with consistent reading state", async () => {
+    const ownerToken = await register("owner@example.com");
+    const otherToken = await register("other@example.com");
+    const created = await request(app)
+      .post("/api/v1/articles")
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ url: fixtureUrl("/manageable") });
+    const articleId = articleResponseSchema.parse(created.body as unknown).data
+      .id;
+    const path = `/api/v1/articles/${articleId}`;
+
+    const otherPatch = await request(app)
+      .patch(path)
+      .set("Authorization", `Bearer ${otherToken}`)
+      .send({ isFavorite: true });
+    const otherProgress = await request(app)
+      .put(`${path}/progress`)
+      .set("Authorization", `Bearer ${otherToken}`)
+      .send({ progress: 25 });
+    const otherDelete = await request(app)
+      .delete(path)
+      .set("Authorization", `Bearer ${otherToken}`);
+    expect([
+      otherPatch.status,
+      otherProgress.status,
+      otherDelete.status,
+    ]).toEqual([404, 404, 404]);
+    expect(
+      (
+        await request(app)
+          .patch(path)
+          .set("Authorization", `Bearer ${ownerToken}`)
+          .send({ title: "Injected" })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app)
+          .put(`${path}/progress`)
+          .set("Authorization", `Bearer ${ownerToken}`)
+          .send({ progress: 101 })
+      ).status,
+    ).toBe(400);
+
+    const updated = await request(app)
+      .patch(path)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ isFavorite: true, isArchived: true });
+    expect(updated.body).toMatchObject({
+      data: { isFavorite: true, isArchived: true },
+    });
+
+    const reading = await request(app)
+      .put(`${path}/progress`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ progress: 25, anchor: "paragraph-2" });
+    expect(reading.body).toMatchObject({
+      data: {
+        readingStatus: "reading",
+        readingProgress: 25,
+        readingAnchor: "paragraph-2",
+      },
+    });
+    const finished = await request(app)
+      .patch(path)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ readingStatus: "finished" });
+    expect(finished.body).toMatchObject({
+      data: { readingStatus: "finished", readingProgress: 100 },
+    });
+    const finishedAt = z
+      .object({ data: z.object({ finishedAt: z.string() }) })
+      .parse(finished.body as unknown).data.finishedAt;
+    const repeated = await request(app)
+      .put(`${path}/progress`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ progress: 100 });
+    expect(repeated.body).toMatchObject({ data: { finishedAt } });
+
+    expect(
+      (
+        await request(app)
+          .delete(path)
+          .set("Authorization", `Bearer ${ownerToken}`)
+      ).status,
+    ).toBe(204);
+    expect(
+      (
+        await request(app)
+          .get(path)
+          .set("Authorization", `Bearer ${ownerToken}`)
+      ).status,
+    ).toBe(404);
+    const job = await pool.query(
+      "select id from extraction_jobs where article_id = $1",
+      [articleId],
+    );
+    expect(job.rowCount).toBe(0);
+  });
+
   it("stores safe failure codes and retries idempotently", async () => {
     const accessToken = await register("owner@example.com");
     const create = await request(app)
