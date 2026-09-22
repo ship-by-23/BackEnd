@@ -52,8 +52,9 @@ const listArticlesSchema = z
       .default(false),
     sort: z
       .enum(["createdAt", "updatedAt", "title", "readingProgress"])
-      .default("createdAt"),
+      .optional(),
     order: z.enum(["asc", "desc"]).default("desc"),
+    query: z.string().trim().max(200).optional(),
   })
   .strict();
 

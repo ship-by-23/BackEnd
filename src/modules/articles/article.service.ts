@@ -33,8 +33,9 @@ export type ListArticlesInput = {
   tagId?: string | undefined;
   favorite?: boolean | undefined;
   archived: boolean;
-  sort: "createdAt" | "updatedAt" | "title" | "readingProgress";
+  sort?: "createdAt" | "updatedAt" | "title" | "readingProgress" | undefined;
   order: "asc" | "desc";
+  query?: string | undefined;
 };
 
 export type UpdateArticleInput = {
@@ -78,6 +79,19 @@ function databaseErrorCode(error: unknown): string | undefined {
   return undefined;
 }
 
+function escapeSnippet(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character as keyof typeof entities];
+  });
+}
+
 export class ArticleService {
   constructor(
     private readonly database: Database,
@@ -85,6 +99,16 @@ export class ArticleService {
   ) {}
 
   async list(userId: string, input: ListArticlesInput) {
+    const query = input.query?.trim();
+    const searchQuery = query
+      ? sql`websearch_to_tsquery('simple', ${query})`
+      : undefined;
+    const rank = searchQuery
+      ? sql<number>`ts_rank_cd(${articles.searchVector}, ${searchQuery})`
+      : sql<null>`null`;
+    const snippet = searchQuery
+      ? sql<string>`ts_headline('simple', coalesce(nullif(${articles.contentText}, ''), nullif(${articles.description}, ''), ${articles.title}, ''), ${searchQuery}, 'MaxWords=24, MinWords=10, StartSel=[[, StopSel=]]')`
+      : sql<null>`null`;
     const conditions: SQL[] = [
       eq(articles.userId, userId),
       eq(articles.isArchived, input.archived),
@@ -92,6 +116,8 @@ export class ArticleService {
     if (input.status) conditions.push(eq(articles.readingStatus, input.status));
     if (input.favorite !== undefined)
       conditions.push(eq(articles.isFavorite, input.favorite));
+    if (searchQuery)
+      conditions.push(sql`${articles.searchVector} @@ ${searchQuery}`);
     if (input.tagId)
       conditions.push(
         exists(
@@ -109,21 +135,27 @@ export class ArticleService {
       );
 
     const where = and(...conditions);
-    const sortColumn = articles[input.sort];
     const sort = input.order === "asc" ? asc : desc;
+    const ordering =
+      searchQuery && !input.sort
+        ? [desc(rank), desc(articles.createdAt), desc(articles.id)]
+        : [sort(articles[input.sort ?? "createdAt"]), desc(articles.id)];
     const [items, [total]] = await Promise.all([
       this.database
-        .select(articleSummary)
+        .select({ ...articleSummary, rank, snippet })
         .from(articles)
         .where(where)
-        .orderBy(sort(sortColumn), desc(articles.id))
+        .orderBy(...ordering)
         .limit(input.pageSize)
         .offset((input.page - 1) * input.pageSize),
       this.database.select({ value: count() }).from(articles).where(where),
     ]);
     const totalItems = total?.value ?? 0;
     return {
-      data: items,
+      data: items.map((item) => ({
+        ...item,
+        snippet: item.snippet === null ? null : escapeSnippet(item.snippet),
+      })),
       pagination: {
         page: input.page,
         pageSize: input.pageSize,
