@@ -264,6 +264,84 @@ describeWithDatabase("article extraction API", () => {
     });
   });
 
+  it("ranks title matches, filters search with library state, and escapes snippets", async () => {
+    const ownerToken = await register("owner@example.com");
+    const otherToken = await register("other@example.com");
+    const save = async (token: string, path: string) => {
+      const result = await request(app)
+        .post("/api/v1/articles")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ url: fixtureUrl(path) });
+      return articleResponseSchema.parse(result.body as unknown).data.id;
+    };
+    const titleId = await save(ownerToken, "/title-match");
+    const bodyId = await save(ownerToken, "/body-match");
+    const otherId = await save(otherToken, "/other-match");
+    await pool.query(
+      `update articles set
+        title = case when id = $1::uuid then 'PostgreSQL guide' else 'Ordinary article' end,
+        content_text = case when id = $1::uuid then 'Safe introduction'
+          else 'PostgreSQL <img src=x onerror=alert(1)> practical search content' end,
+        search_vector = setweight(to_tsvector('simple', case when id = $1::uuid then 'PostgreSQL guide' else 'Ordinary article' end), 'A') ||
+          setweight(to_tsvector('simple', case when id = $1::uuid then 'Safe introduction'
+            else 'PostgreSQL <img src=x onerror=alert(1)> practical search content' end), 'C'),
+        is_favorite = id = $2::uuid
+       where id in ($1::uuid, $2::uuid, $3::uuid)`,
+      [titleId, bodyId, otherId],
+    );
+
+    const search = await request(app)
+      .get("/api/v1/articles?query=PostgreSQL")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(search.status).toBe(200);
+    const results = z
+      .object({
+        data: z.array(
+          z.object({ id: z.uuid(), rank: z.number(), snippet: z.string() }),
+        ),
+        pagination: z.object({ totalItems: z.number() }),
+      })
+      .parse(search.body as unknown);
+    expect(results.data.map((item) => item.id)).toEqual([titleId, bodyId]);
+    expect(results.data[0]?.rank).toBeGreaterThan(results.data[1]?.rank ?? 0);
+    expect(results.pagination.totalItems).toBe(2);
+    expect(results.data[1]?.snippet).toContain("&lt;img");
+    expect(results.data[1]?.snippet).not.toContain("<img");
+
+    const filtered = await request(app)
+      .get("/api/v1/articles?query=PostgreSQL&favorite=true&pageSize=1")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(filtered.body).toMatchObject({
+      data: [{ id: bodyId }],
+      pagination: { totalItems: 1, totalPages: 1 },
+    });
+    const empty = await request(app)
+      .get("/api/v1/articles?query=%20%20")
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(empty.body).toMatchObject({ pagination: { totalItems: 2 } });
+    const invalid = await request(app)
+      .get(`/api/v1/articles?query=${"x".repeat(201)}`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(invalid.status).toBe(400);
+  });
+
+  it("uses the search vector GIN index for selective queries", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query("set local enable_seqscan = off");
+      const plan = await client.query<{ "QUERY PLAN": string }>(
+        "explain select id from articles where search_vector @@ websearch_to_tsquery('simple', 'uncommonterm')",
+      );
+      expect(plan.rows.map((row) => row["QUERY PLAN"]).join(" ")).toContain(
+        "articles_search_vector_idx",
+      );
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  });
+
   it("validates library query parameters and requires authentication", async () => {
     const token = await register("owner@example.com");
     for (const query of [

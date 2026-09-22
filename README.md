@@ -37,8 +37,10 @@ Article ingestion endpoints are also under `/api/v1`:
 
 - `POST /articles` queues a URL and returns `202 Accepted`.
 - `GET /articles` lists owned article summaries with pagination and optional
-  `status`, `tagId`, `favorite`, `archived`, `sort`, and `order` filters. The
-  default is unarchived, newest-first; `pageSize` is capped at 100.
+  `status`, `tagId`, `favorite`, `archived`, `sort`, `order`, and `query` filters.
+  Search ranks title, description, and body matches and returns HTML-escaped
+  snippets. Empty queries behave like library browsing. The default is
+  unarchived, newest-first; `pageSize` is capped at 100.
 - `GET /articles/:articleId` returns owned article content and extraction state.
 - `PATCH /articles/:articleId` updates reading status, favorite, or archive state.
 - `PUT /articles/:articleId/progress` saves a 0–100 progress value and optional
