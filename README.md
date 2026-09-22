@@ -59,6 +59,16 @@ rename, and delete tags; attach or detach tags at
 delete highlights. Highlights can be listed across the library or for one
 article. Tag and highlight lists are paginated.
 
+Administrators manage extraction deny rules through
+`/api/v1/admin/blocked-domains`. Rules match the normalized hostname exactly and
+match child hostnames only when `includeSubdomains` is enabled. Create, update,
+and delete actions write minimal audit records containing the administrator,
+action, rule ID, and hostname—never article content.
+
+The bookmarklet should open the SimpanDulu web save flow with the current page
+URL as input. The web application then submits through the normal authenticated
+session; bookmarklet source must not contain an access token or password.
+
 ## Docker
 
 ```bash

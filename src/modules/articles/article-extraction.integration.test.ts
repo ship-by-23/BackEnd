@@ -116,7 +116,9 @@ describeWithDatabase("article extraction API", () => {
   });
 
   beforeEach(async () => {
-    await pool.query("truncate table users, blocked_domains cascade");
+    await pool.query(
+      "truncate table users, blocked_domains, admin_audit_logs cascade",
+    );
   });
 
   afterAll(async () => {
@@ -704,6 +706,143 @@ describeWithDatabase("article extraction API", () => {
     expect(failed.body).toMatchObject({
       data: { extractionStatus: "failed", extractionErrorCode: "URL_BLOCKED" },
     });
+  });
+
+  it("restricts blocked-domain administration and audits rule enforcement", async () => {
+    const userToken = await register("user@example.com");
+    const adminToken = await register("admin@example.com");
+    const admin = await pool.query<{ id: string }>(
+      "update users set role = 'admin' where normalized_email = 'admin@example.com' returning id",
+    );
+    const adminId = admin.rows[0]?.id;
+    if (!adminId) throw new Error("Expected administrator user");
+    const endpoint = "/api/v1/admin/blocked-domains";
+
+    expect(
+      (
+        await request(app)
+          .get(endpoint)
+          .set("Authorization", `Bearer ${userToken}`)
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request(app)
+          .post(endpoint)
+          .set("Authorization", `Bearer ${userToken}`)
+          .send({ hostname: "denied.test", reason: "Not allowed" })
+      ).status,
+    ).toBe(403);
+
+    const created = await request(app)
+      .post(endpoint)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        hostname: "  BLOCKED.TEST. ",
+        includeSubdomains: false,
+        reason: "Unsafe source",
+      });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({
+      data: {
+        hostname: "blocked.test",
+        includeSubdomains: false,
+        reason: "Unsafe source",
+        createdByUserId: adminId,
+      },
+    });
+    const domainId = z
+      .object({ data: z.object({ id: z.uuid() }) })
+      .parse(created.body as unknown).data.id;
+    const duplicate = await request(app)
+      .post(endpoint)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ hostname: "blocked.test", reason: "Duplicate" });
+    expect(duplicate.status).toBe(409);
+    const invalid = await request(app)
+      .post(endpoint)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ hostname: "https://blocked.test/path", reason: "Invalid" });
+    expect(invalid.status).toBe(400);
+
+    const policy = createDestinationPolicy(database, {
+      allowNonStandardPorts: true,
+      resolveHostname: () =>
+        Promise.resolve([{ address: "1.1.1.1", family: 4 }]),
+    });
+    await expect(policy(new URL("https://blocked.test"))).rejects.toMatchObject(
+      { code: "URL_BLOCKED" },
+    );
+    await expect(
+      policy(new URL("https://child.blocked.test")),
+    ).resolves.toMatchObject({ address: "1.1.1.1" });
+
+    const updated = await request(app)
+      .patch(`${endpoint}/${domainId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ includeSubdomains: true, reason: "Block the domain tree" });
+    expect(updated.body).toMatchObject({
+      data: { hostname: "blocked.test", includeSubdomains: true },
+    });
+    await expect(
+      policy(new URL("https://child.blocked.test")),
+    ).rejects.toMatchObject({ code: "URL_BLOCKED" });
+
+    const queued = await request(app)
+      .post("/api/v1/articles")
+      .set("Authorization", `Bearer ${userToken}`)
+      .send({ url: `http://blocked.test:${String(fixturePort)}/article` });
+    const article = articleResponseSchema.parse(queued.body as unknown).data;
+    await worker.processNext();
+    const failed = await request(app)
+      .get(`/api/v1/articles/${article.id}`)
+      .set("Authorization", `Bearer ${userToken}`);
+    expect(failed.body).toMatchObject({
+      data: { extractionStatus: "failed", extractionErrorCode: "URL_BLOCKED" },
+    });
+
+    const list = await request(app)
+      .get(endpoint)
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(list.body).toMatchObject({
+      data: [{ id: domainId }],
+      pagination: { totalItems: 1 },
+    });
+    expect(
+      (
+        await request(app)
+          .delete(`${endpoint}/${domainId}`)
+          .set("Authorization", `Bearer ${adminToken}`)
+      ).status,
+    ).toBe(204);
+    const audit = await pool.query<{
+      action: string;
+      actor_user_id: string;
+      blocked_domain_id: string;
+      hostname: string;
+    }>(
+      "select action, actor_user_id, blocked_domain_id, hostname from admin_audit_logs order by created_at, action",
+    );
+    expect(audit.rows).toEqual([
+      {
+        action: "blocked_domain.created",
+        actor_user_id: adminId,
+        blocked_domain_id: domainId,
+        hostname: "blocked.test",
+      },
+      {
+        action: "blocked_domain.updated",
+        actor_user_id: adminId,
+        blocked_domain_id: domainId,
+        hostname: "blocked.test",
+      },
+      {
+        action: "blocked_domain.deleted",
+        actor_user_id: adminId,
+        blocked_domain_id: domainId,
+        hostname: "blocked.test",
+      },
+    ]);
   });
 
   it("rejects private and mixed DNS answers before opening a connection", async () => {

@@ -298,3 +298,29 @@ export const blockedDomains = pgTable(
     ),
   ],
 );
+
+export const adminAuditLogs = pgTable(
+  "admin_audit_logs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actorUserId: uuid("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    action: text("action").notNull(),
+    blockedDomainId: uuid("blocked_domain_id"),
+    hostname: text("hostname").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "admin_audit_logs_action_valid",
+      sql`${table.action} in ('blocked_domain.created', 'blocked_domain.updated', 'blocked_domain.deleted')`,
+    ),
+    index("admin_audit_logs_actor_created_at_idx").on(
+      table.actorUserId,
+      table.createdAt,
+    ),
+  ],
+);
