@@ -184,6 +184,82 @@ describeWithDatabase("article extraction API", () => {
     expect(crossUser.status).toBe(404);
   });
 
+  it("completes the save, search, read, highlight, and logout flow", async () => {
+    const agent = request.agent(app);
+    const credentials = {
+      email: "journey@example.com",
+      password: "correct-horse-battery-staple",
+    };
+    const registration = await agent.post("/api/v1/auth/register").send({
+      name: "Journey Reader",
+      ...credentials,
+      passwordConfirmation: credentials.password,
+    });
+    expect(registration.status).toBe(201);
+
+    const login = await agent.post("/api/v1/auth/login").send(credentials);
+    expect(login.status).toBe(200);
+    const accessToken = authResponseSchema.parse(login.body as unknown).data
+      .accessToken;
+    const cookieHeader: unknown = login.headers["set-cookie"];
+    if (!Array.isArray(cookieHeader) || typeof cookieHeader[0] !== "string")
+      throw new Error("Expected refresh cookie");
+    const refreshCookie = cookieHeader[0].split(";")[0];
+    if (!refreshCookie) throw new Error("Expected refresh cookie value");
+
+    const submitted = await agent
+      .post("/api/v1/articles")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ url: fixtureUrl("/journey") });
+    expect(submitted.status).toBe(202);
+    const articleId = articleResponseSchema.parse(submitted.body as unknown)
+      .data.id;
+    await expect(worker.processNext()).resolves.toBe(true);
+    const articlePath = `/api/v1/articles/${articleId}`;
+    const extracted = await agent
+      .get(articlePath)
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(extracted.body).toMatchObject({
+      data: { extractionStatus: "completed", readingStatus: "unread" },
+    });
+
+    const search = await agent
+      .get("/api/v1/articles?query=Meaningful")
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(search.body).toMatchObject({
+      data: [{ id: articleId }],
+      pagination: { totalItems: 1 },
+    });
+    const progress = await agent
+      .put(`${articlePath}/progress`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ progress: 42, anchor: "paragraph-2" });
+    expect(progress.body).toMatchObject({
+      data: { readingStatus: "reading", readingProgress: 42 },
+    });
+    const highlight = await agent
+      .post(`${articlePath}/highlights`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ quote: "Meaningful article content", note: "Review later" });
+    expect(highlight.status).toBe(201);
+    expect(highlight.body).toMatchObject({
+      data: { note: "Review later" },
+    });
+    const organized = await agent
+      .patch(articlePath)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ isFavorite: true, isArchived: true });
+    expect(organized.body).toMatchObject({
+      data: { isFavorite: true, isArchived: true },
+    });
+
+    expect((await agent.post("/api/v1/auth/logout")).status).toBe(204);
+    const revoked = await request(app)
+      .post("/api/v1/auth/refresh")
+      .set("Cookie", refreshCookie);
+    expect(revoked.status).toBe(401);
+  });
+
   it("lists only owned article summaries with combined filters and pagination", async () => {
     const ownerToken = await register("owner@example.com");
     const otherToken = await register("other@example.com");

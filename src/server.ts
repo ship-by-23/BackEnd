@@ -75,8 +75,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   forceExit.unref();
 
   try {
-    await closeServer();
-    await extractionWorker.stop();
+    await Promise.all([closeServer(), extractionWorker.stop()]);
     await pool.end();
   } catch (error) {
     logger.error({ err: error }, "Graceful shutdown failed");

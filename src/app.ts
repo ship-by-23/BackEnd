@@ -26,6 +26,25 @@ export function createApp({
   app.use(
     pinoHttp({
       logger,
+      wrapSerializers: false,
+      serializers: {
+        req: (request: {
+          id?: string | number | object;
+          method?: string;
+          url?: string;
+        }) => ({
+          id: request.id,
+          method: request.method,
+          path: request.url?.split("?", 1)[0],
+        }),
+        res: (response: { statusCode?: number }) => ({
+          statusCode: response.statusCode,
+        }),
+        err: (error: Error & { code?: string }) => ({
+          type: error.name,
+          code: error.code,
+        }),
+      },
       genReqId(request, response) {
         const incomingId = request.headers["x-request-id"];
         const requestId =

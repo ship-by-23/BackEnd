@@ -1,0 +1,583 @@
+openapi: 3.1.0
+info:
+  title: SimpanDulu API
+  version: 0.1.0
+  description: Private read-it-later API. Dates are ISO 8601 timestamps in UTC.
+servers:
+  - url: http://localhost:3000
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ArticleId:
+      name: articleId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TagId:
+      name: tagId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    HighlightId:
+      name: highlightId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    DomainId:
+      name: domainId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            fields:
+              type: object
+              additionalProperties: { type: string }
+      example:
+        error:
+          code: VALIDATION_ERROR
+          message: The request could not be processed.
+          fields: { url: Enter a valid HTTP or HTTPS URL. }
+    Pagination:
+      type: object
+      required: [page, pageSize, totalItems, totalPages]
+      properties:
+        page: { type: integer, minimum: 1, example: 1 }
+        pageSize: { type: integer, minimum: 1, maximum: 100, example: 20 }
+        totalItems: { type: integer, minimum: 0, example: 1 }
+        totalPages: { type: integer, minimum: 0, example: 1 }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email, example: reader@example.test }
+        name: { type: string, example: Reader }
+        role: { type: string, enum: [user, admin] }
+    Session:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            user: { $ref: '#/components/schemas/User' }
+            accessToken: { type: string, example: '<short-lived-access-token>' }
+            tokenType: { type: string, const: Bearer }
+            expiresIn: { type: integer, example: 900 }
+    ArticleSubmission:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            submittedUrl: { type: string, format: uri }
+            extractionStatus: { type: string, enum: [pending, processing, completed, failed] }
+            extractionErrorCode: { type: [string, 'null'] }
+      example:
+        data:
+          id: 00000000-0000-4000-8000-000000000101
+          submittedUrl: https://example.com/article
+          extractionStatus: pending
+          extractionErrorCode: null
+    Article:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        submittedUrl: { type: string, format: uri }
+        title: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        contentHtml: { type: [string, 'null'], description: Sanitized reader HTML; detail response only. }
+        contentText: { type: [string, 'null'], description: Plain reader text; detail response only. }
+        readingStatus: { type: string, enum: [unread, reading, finished] }
+        readingProgress: { type: integer, minimum: 0, maximum: 100 }
+        readingAnchor: { type: [string, 'null'] }
+        isFavorite: { type: boolean }
+        isArchived: { type: boolean }
+        extractionStatus: { type: string, enum: [pending, processing, completed, failed] }
+        extractionErrorCode: { type: [string, 'null'] }
+        rank: { type: [number, 'null'], description: Present on library results only. }
+        snippet: { type: [string, 'null'], description: HTML-escaped search snippet; present on library results only. }
+    Tag:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Research }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Highlight:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        articleId: { type: string, format: uuid }
+        quote: { type: string, example: A useful passage }
+        prefix: { type: string }
+        suffix: { type: string }
+        startOffset: { type: [integer, 'null'] }
+        endOffset: { type: [integer, 'null'] }
+        note: { type: [string, 'null'], example: Revisit for the presentation }
+    BlockedDomain:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string, example: unsafe.example }
+        includeSubdomains: { type: boolean, example: true }
+        reason: { type: string, example: Unsafe source }
+        createdByUserId: { type: [string, 'null'], format: uuid }
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Authentication required or session invalid
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource missing or not owned by this user
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+paths:
+  /health/live:
+    get:
+      summary: Process liveness
+      security: []
+      responses:
+        '200':
+          description: Process is running
+          content:
+            application/json:
+              example: { status: ok }
+  /health/ready:
+    get:
+      summary: Database readiness
+      security: []
+      responses:
+        '200':
+          description: Database is reachable
+          content:
+            application/json:
+              example: { status: ready }
+        '503': { description: Database unavailable }
+  /api/v1/auth/register:
+    post:
+      summary: Register and start a session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, passwordConfirmation]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                passwordConfirmation: { type: string, format: password }
+            example:
+              name: Reader
+              email: reader@example.test
+              password: '<password>'
+              passwordConfirmation: '<password>'
+      responses:
+        '201':
+          description: Session created; rotating refresh token is set as an HTTP-only cookie
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/auth/login:
+    post:
+      summary: Sign in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+            example: { email: reader@example.test, password: '<password>' }
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/refresh:
+    post:
+      summary: Rotate refresh cookie and issue an access token
+      security: []
+      responses:
+        '200':
+          description: New session tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke refresh session
+      security: []
+      responses:
+        '204': { description: Session revoked }
+  /api/v1/me:
+    get:
+      summary: Current profile
+      responses:
+        '200':
+          description: Owned user profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      summary: Update profile name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+            example: { name: Updated Reader }
+      responses:
+        '200': { description: Updated profile }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/me/password:
+    put:
+      summary: Change password and revoke refresh sessions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              currentPassword: '<current-password>'
+              newPassword: '<new-password>'
+              passwordConfirmation: '<new-password>'
+      responses:
+        '204': { description: Password changed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/articles:
+    post:
+      summary: Save a URL for extraction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+                tagIds:
+                  type: array
+                  items: { type: string, format: uuid }
+            example: { url: https://example.com/article, tagIds: [] }
+      responses:
+        '202':
+          description: Extraction queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArticleSubmission' }
+        '200': { description: Existing owned article returned }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    get:
+      summary: List and search owned article summaries
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: query, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: status, in: query, schema: { type: string, enum: [unread, reading, finished] } }
+        - { name: tagId, in: query, schema: { type: string, format: uuid } }
+        - { name: favorite, in: query, schema: { type: boolean } }
+        - { name: archived, in: query, schema: { type: boolean, default: false } }
+        - { name: sort, in: query, schema: { type: string, enum: [createdAt, updatedAt, title, readingProgress] } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        '200':
+          description: Paginated summaries; contentHtml and contentText are omitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Article' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+              example:
+                data:
+                  - id: 00000000-0000-4000-8000-000000000101
+                    title: Organizing study notes
+                    readingStatus: unread
+                    extractionStatus: completed
+                    rank: 0.84
+                    snippet: '[[notes]] capture the central idea'
+                pagination: { page: 1, pageSize: 20, totalItems: 1, totalPages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/articles/{articleId}:
+    parameters:
+      - { $ref: '#/components/parameters/ArticleId' }
+    get:
+      summary: Read an owned article
+      responses:
+        '200':
+          description: Reader content and metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Article' }
+              example:
+                data:
+                  id: 00000000-0000-4000-8000-000000000101
+                  title: Organizing study notes
+                  contentHtml: '<p>Good study notes capture the central idea.</p>'
+                  contentText: Good study notes capture the central idea.
+                  readingStatus: unread
+                  extractionStatus: completed
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Update reading status, favorite, or archive state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                readingStatus: { type: string, enum: [unread, reading, finished] }
+                isFavorite: { type: boolean }
+                isArchived: { type: boolean }
+            example: { isFavorite: true, isArchived: false }
+      responses:
+        '200': { description: Updated article detail }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete an owned article and its dependent records
+      responses:
+        '204': { description: Article deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/articles/{articleId}/retry:
+    parameters:
+      - { $ref: '#/components/parameters/ArticleId' }
+    post:
+      summary: Requeue a failed extraction
+      responses:
+        '202': { description: Article requeued }
+        '409': { description: Article is not in a retryable state }
+  /api/v1/articles/{articleId}/progress:
+    parameters:
+      - { $ref: '#/components/parameters/ArticleId' }
+    put:
+      summary: Save reading progress and optional anchor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [progress]
+              properties:
+                progress: { type: integer, minimum: 0, maximum: 100 }
+                anchor: { type: [string, 'null'], maxLength: 2048 }
+            example: { progress: 42, anchor: paragraph-3 }
+      responses:
+        '200': { description: Updated article detail }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tags:
+    get:
+      summary: List owned tags
+      responses:
+        '200': { description: Paginated tags }
+    post:
+      summary: Create a tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 100 }
+            example: { name: Research }
+      responses:
+        '201':
+          description: Tag created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Tag' }
+        '409': { description: Tag name already used }
+  /api/v1/tags/{tagId}:
+    parameters:
+      - { $ref: '#/components/parameters/TagId' }
+    patch:
+      summary: Rename an owned tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: { name: Reading }
+      responses:
+        '200': { description: Updated tag }
+    delete:
+      summary: Delete an owned tag; articles remain
+      responses:
+        '204': { description: Tag deleted }
+  /api/v1/articles/{articleId}/tags/{tagId}:
+    parameters:
+      - { $ref: '#/components/parameters/ArticleId' }
+      - { $ref: '#/components/parameters/TagId' }
+    put:
+      summary: Attach an owned tag to an owned article
+      responses:
+        '204': { description: Tag attached, including when already attached }
+    delete:
+      summary: Detach a tag from an owned article
+      responses:
+        '204': { description: Tag detached }
+  /api/v1/highlights:
+    get:
+      summary: List highlights across the owned library
+      responses:
+        '200': { description: Paginated highlights }
+  /api/v1/articles/{articleId}/highlights:
+    parameters:
+      - { $ref: '#/components/parameters/ArticleId' }
+    get:
+      summary: List an article's highlights
+      responses:
+        '200': { description: Paginated highlights }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      summary: Save a quote, context, offsets, and optional note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quote]
+              properties:
+                quote: { type: string, maxLength: 10000 }
+                prefix: { type: string, maxLength: 500 }
+                suffix: { type: string, maxLength: 500 }
+                startOffset: { type: [integer, 'null'], minimum: 0 }
+                endOffset: { type: [integer, 'null'], minimum: 0 }
+                note: { type: [string, 'null'], maxLength: 10000 }
+            example:
+              quote: A useful passage
+              prefix: Before it
+              suffix: After it
+              note: Revisit for the presentation
+      responses:
+        '201':
+          description: Highlight saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Highlight' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/highlights/{highlightId}:
+    parameters:
+      - { $ref: '#/components/parameters/HighlightId' }
+    patch:
+      summary: Update an owned highlight note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: { note: Updated note }
+      responses:
+        '200': { description: Updated highlight }
+    delete:
+      summary: Delete an owned highlight
+      responses:
+        '204': { description: Highlight deleted }
+  /api/v1/admin/blocked-domains:
+    get:
+      summary: List blocked-domain rules (administrator only)
+      responses:
+        '200': { description: Paginated domain rules }
+        '403': { description: Administrator role required }
+    post:
+      summary: Block a hostname (administrator only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostname, reason]
+              properties:
+                hostname: { type: string, maxLength: 253 }
+                includeSubdomains: { type: boolean, default: true }
+                reason: { type: string, maxLength: 500 }
+            example:
+              hostname: unsafe.example
+              includeSubdomains: true
+              reason: Unsafe source
+      responses:
+        '201':
+          description: Rule created and audited
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/BlockedDomain' }
+        '403': { description: Administrator role required }
+        '409': { description: Hostname already blocked }
+  /api/v1/admin/blocked-domains/{domainId}:
+    parameters:
+      - { $ref: '#/components/parameters/DomainId' }
+    patch:
+      summary: Update and audit a blocked-domain rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example: { includeSubdomains: false, reason: Exact host only }
+      responses:
+        '200': { description: Rule updated }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete and audit a blocked-domain rule
+      responses:
+        '204': { description: Rule deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
