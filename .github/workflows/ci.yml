@@ -52,6 +52,10 @@ jobs:
       - name: Check formatting
         run: npm run format:check
 
+      # The Vercel entrypoint imports generated dist/runtime.js.
+      - name: Build
+        run: npm run build
+
       - name: Lint
         run: npm run lint
 
@@ -60,9 +64,6 @@ jobs:
 
       - name: Test
         run: npm test
-
-      - name: Build
-        run: npm run build
 
       - name: Audit dependencies
         run: npm audit --audit-level=moderate
