@@ -6,11 +6,15 @@ import { createAdminRouter } from "./modules/admin/admin.routes.js";
 import { createAuthRouter } from "./modules/auth/auth.routes.js";
 import { createOrganizationRouter } from "./modules/organization/organization.routes.js";
 
-export function createApiRouter(database: Database, config: AppConfig): Router {
+export function createApiRouter(
+  database: Database,
+  config: AppConfig,
+  scheduleExtraction?: () => void,
+): Router {
   const router = Router();
   router.use(createAdminRouter(database, config));
   router.use(createAuthRouter(database, config));
-  router.use(createArticleRouter(database, config));
+  router.use(createArticleRouter(database, config, scheduleExtraction));
   router.use(createOrganizationRouter(database, config));
   return router;
 }

@@ -118,6 +118,7 @@ function parse<T>(schema: z.ZodType<T>, value: unknown): T {
 export function createArticleRouter(
   database: Database,
   config: AppConfig,
+  scheduleExtraction?: () => void,
 ): Router {
   const router = Router();
   const service = new ArticleService(database, config.NODE_ENV === "test");
@@ -134,6 +135,7 @@ export function createArticleRouter(
         extractionErrorCode: result.article.extractionErrorCode,
       },
     });
+    if (result.created) scheduleExtraction?.();
   });
 
   router.get("/articles", async (request, response) => {
@@ -145,6 +147,12 @@ export function createArticleRouter(
     const { articleId } = parse(articleParamsSchema, request.params as unknown);
     const article = await service.get(requireUserId(request), articleId);
     response.json({ data: articleDetail(article) });
+    if (
+      article.extractionStatus === "pending" ||
+      article.extractionStatus === "processing"
+    ) {
+      scheduleExtraction?.();
+    }
   });
 
   router.patch("/articles/:articleId", async (request, response) => {
@@ -185,6 +193,7 @@ export function createArticleRouter(
         extractionErrorCode: article.extractionErrorCode,
       },
     });
+    scheduleExtraction?.();
   });
 
   return router;

@@ -142,6 +142,112 @@ describeWithDatabase("article extraction API", () => {
     return `http://fixture.test:${String(fixturePort)}${path}`;
   }
 
+  it("completes queued extraction without an always-on worker", async () => {
+    const scheduled: Promise<boolean>[] = [];
+    const requestApp = createApp({
+      config,
+      logger,
+      checkDatabase: async () => {
+        await pool.query("select 1");
+      },
+      apiRouter: createApiRouter(database, config, () => {
+        scheduled.push(worker.processNext());
+      }),
+    });
+    const accessToken = await register("request-worker@example.com");
+    const submitted = await request(requestApp)
+      .post("/api/v1/articles")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ url: fixtureUrl("/request-worker") });
+
+    expect(submitted.status).toBe(202);
+    await Promise.all(scheduled);
+    const articleId = articleResponseSchema.parse(submitted.body as unknown)
+      .data.id;
+    const detail = await request(app)
+      .get(`/api/v1/articles/${articleId}`)
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(detail.body).toMatchObject({
+      data: { extractionStatus: "completed", title: "Integration article" },
+    });
+  });
+
+  it("recovers queued extraction when the submit request's work was interrupted", async () => {
+    const scheduled: Promise<boolean>[] = [];
+    let acceptWork = false;
+    const requestApp = createApp({
+      config,
+      logger,
+      checkDatabase: async () => {
+        await pool.query("select 1");
+      },
+      apiRouter: createApiRouter(database, config, () => {
+        if (acceptWork) scheduled.push(worker.processNext());
+      }),
+    });
+    const accessToken = await register("recovered-worker@example.com");
+    const submitted = await request(requestApp)
+      .post("/api/v1/articles")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ url: fixtureUrl("/recovered-worker") });
+    const articleId = articleResponseSchema.parse(submitted.body as unknown)
+      .data.id;
+
+    acceptWork = true;
+    const pending = await request(requestApp)
+      .get(`/api/v1/articles/${articleId}`)
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(pending.body).toMatchObject({
+      data: { extractionStatus: "pending" },
+    });
+    await Promise.all(scheduled);
+
+    const completed = await request(requestApp)
+      .get(`/api/v1/articles/${articleId}`)
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(completed.body).toMatchObject({
+      data: { extractionStatus: "completed", title: "Integration article" },
+    });
+  });
+
+  it("runs a retried extraction without an always-on worker", async () => {
+    const scheduled: Promise<boolean>[] = [];
+    const requestApp = createApp({
+      config,
+      logger,
+      checkDatabase: async () => {
+        await pool.query("select 1");
+      },
+      apiRouter: createApiRouter(database, config, () => {
+        scheduled.push(worker.processNext());
+      }),
+    });
+    const accessToken = await register("retry-worker@example.com");
+    const submitted = await request(requestApp)
+      .post("/api/v1/articles")
+      .set("Authorization", `Bearer ${accessToken}`)
+      .send({ url: fixtureUrl("/non-html") });
+    const articleId = articleResponseSchema.parse(submitted.body as unknown)
+      .data.id;
+    await Promise.all(scheduled);
+
+    const retried = await request(requestApp)
+      .post(`/api/v1/articles/${articleId}/retry`)
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(retried.status).toBe(202);
+    await Promise.all(scheduled);
+
+    const detail = await request(app)
+      .get(`/api/v1/articles/${articleId}`)
+      .set("Authorization", `Bearer ${accessToken}`);
+    expect(detail.body).toMatchObject({
+      data: {
+        extractionStatus: "failed",
+        extractionErrorCode: "UNSUPPORTED_CONTENT",
+      },
+    });
+  });
+
   it("queues, deduplicates, extracts, sanitizes, and isolates an article", async () => {
     const accessToken = await register("owner@example.com");
     const create = await request(app)
