@@ -4,6 +4,27 @@ The root `compose.yml` is a local development stack with fixed local database
 credentials. Use a managed PostgreSQL database and externally supplied secrets
 for any deployed environment. The API requires Node.js 24 and PostgreSQL 17.
 
+## Render staging
+
+`render.yaml` defines a separate staging API and PostgreSQL database in
+Singapore. The API image is built from the repository `Dockerfile`. Render runs
+`node dist/db/migrate.js` when its free-tier instance starts, before starting
+the API, and checks `/health/ready` before serving requests. The database
+connection and access-token secret are provided by Render; neither is stored
+in Git.
+
+The initial `CORS_ORIGIN` is `http://localhost:5173`. Set it to the frontend's
+exact HTTPS origin when that site exists. The refresh cookie uses
+`SameSite=Lax`, so a frontend on another site cannot use the refresh flow by
+calling the API directly. Host the frontend on the same site as the API, or
+proxy API requests through the frontend's origin. Do not weaken the cookie
+policy just to make unrelated staging domains work.
+
+Render's free PostgreSQL database expires after 30 days and has no managed
+backups. Treat this staging data as disposable; upgrade or export it before
+expiry if it needs to be retained. Free web services can also sleep when idle,
+so the first request after inactivity may be slower.
+
 ## Configuration
 
 Use [`.env.production.example`](../.env.production.example) as a list of required

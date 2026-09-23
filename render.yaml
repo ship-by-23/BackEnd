@@ -1,0 +1,38 @@
+projects:
+  - name: simpandulu
+    environments:
+      - name: staging
+        services:
+          - type: web
+            name: simpandulu-api-staging
+            runtime: docker
+            plan: free
+            region: singapore
+            repo: https://github.com/ship-by-23/BackEnd
+            branch: main
+            autoDeployTrigger: checksPass
+            dockerCommand: "/bin/sh -c 'node dist/db/migrate.js && exec node dist/server.js'"
+            healthCheckPath: /health/ready
+            envVars:
+              - key: NODE_ENV
+                value: production
+              - key: PORT
+                value: 3000
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: simpandulu-db-staging
+                  property: connectionString
+              - key: CORS_ORIGIN
+                value: http://localhost:5173
+              - key: DATABASE_MAX_CONNECTIONS
+                value: 5
+              - key: ACCESS_TOKEN_SECRET
+                generateValue: true
+        databases:
+          - name: simpandulu-db-staging
+            databaseName: simpandulu_staging
+            user: simpandulu
+            plan: free
+            region: singapore
+            postgresMajorVersion: "17"
+            ipAllowList: []
