@@ -16,9 +16,11 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "allowJs": true,
     "types": ["node", "vitest/globals"]
   },
   "include": [
+    "api/**/*.js",
     "src/**/*.ts",
     "vitest.config.ts",
     "drizzle.config.ts",

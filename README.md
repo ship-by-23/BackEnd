@@ -22,7 +22,8 @@ docker compose up postgres -d
 ```
 
 The API listens on `http://localhost:3000`. Health endpoints are available at
-`/health/live` and `/health/ready`.
+`/health/live` and `/health/ready`. The interactive API reference is at
+`/docs`, with its OpenAPI source at `/openapi.yaml`; both are public.
 
 Authentication endpoints are available under `/api/v1`:
 
@@ -48,9 +49,11 @@ Article ingestion endpoints are also under `/api/v1`:
 - `DELETE /articles/:articleId` removes an owned article and dependent records.
 - `POST /articles/:articleId/retry` requeues a failed extraction.
 
-The in-process worker claims durable PostgreSQL jobs, validates and pins every
-network destination, follows only validated redirects, extracts readable content,
-and sanitizes HTML before storage. Failed submissions remain visible with a stable
+The local server's in-process worker claims durable PostgreSQL jobs. On Vercel,
+article requests instead schedule bounded background work and detail polling
+can recover interrupted jobs. Both modes validate and pin every network
+destination, follow only validated redirects, extract readable content, and
+sanitize HTML before storage. Failed submissions remain visible with a stable
 error code.
 
 Organization endpoints under `/api/v1` let authenticated users create, list,
@@ -79,6 +82,9 @@ The Compose file is for local development. Production configuration, migration,
 backup, rollback, and deterministic demo data are documented in
 [`docs/operations.md`](docs/operations.md). The API contract with request and
 response examples is in [`docs/openapi.yaml`](docs/openapi.yaml).
+
+For the free university-project deployment on Vercel and Neon, see
+[`docs/vercel-neon.md`](docs/vercel-neon.md).
 
 ## Validation
 

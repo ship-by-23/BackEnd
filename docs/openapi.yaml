@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: Private read-it-later API. Dates are ISO 8601 timestamps in UTC.
 servers:
-  - url: http://localhost:3000
+  - url: /
 security:
   - bearerAuth: []
 components:

@@ -90,6 +90,28 @@ describe("health endpoints", () => {
   });
 });
 
+describe("public API documentation", () => {
+  it("serves the OpenAPI document without authentication", async () => {
+    const app = createApp({ config, logger, checkDatabase: vi.fn() });
+    const response = await request(app).get("/openapi.yaml");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toMatch(/yaml/);
+    expect(response.text).toContain("openapi: 3.1.0");
+    expect(response.text).toContain("url: /");
+  });
+
+  it("renders an interactive reference without authentication", async () => {
+    const app = createApp({ config, logger, checkDatabase: vi.fn() });
+    const response = await request(app).get("/docs");
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toMatch(/html/);
+    expect(response.text).toContain("Scalar");
+    expect(response.text).toContain("/openapi.yaml");
+  });
+});
+
 describe("fallback behavior", () => {
   it("uses the shared error envelope for unknown routes", async () => {
     const app = createApp({ config, logger, checkDatabase: vi.fn() });

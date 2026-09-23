@@ -1,50 +1,8 @@
 import "dotenv/config";
-import { randomUUID } from "node:crypto";
-import { hostname } from "node:os";
 import { createServer } from "node:http";
-import { Pool } from "pg";
-import { createApiRouter } from "./api.js";
-import { createApp } from "./app.js";
-import { parseEnvironment } from "./config/env.js";
-import { createDatabase } from "./db/client.js";
-import { createLogger } from "./lib/logger.js";
-import { ArticleFetcher } from "./modules/extraction/article-fetcher.js";
-import { ExtractionRepository } from "./modules/extraction/extraction.repository.js";
-import { ExtractionWorker } from "./modules/extraction/extraction.worker.js";
-import { createDestinationPolicy } from "./modules/extraction/url-policy.js";
+import { createRuntime } from "./runtime.js";
 
-const config = parseEnvironment(process.env);
-const logger = createLogger(config);
-const pool = new Pool({
-  connectionString: config.DATABASE_URL,
-  max: config.DATABASE_MAX_CONNECTIONS,
-});
-
-const database = createDatabase(pool);
-const extractionRepository = new ExtractionRepository(
-  pool,
-  `${hostname()}-${randomUUID()}`,
-  config.EXTRACTION_STALE_LOCK_MS,
-);
-const articleFetcher = new ArticleFetcher(
-  config,
-  createDestinationPolicy(database),
-);
-const extractionWorker = new ExtractionWorker(
-  extractionRepository,
-  articleFetcher,
-  logger,
-  config.EXTRACTION_POLL_INTERVAL_MS,
-);
-
-const app = createApp({
-  config,
-  logger,
-  apiRouter: createApiRouter(database, config),
-  checkDatabase: async () => {
-    await pool.query("select 1");
-  },
-});
+const { app, config, logger, pool, extractionWorker } = createRuntime();
 const server = createServer(app);
 
 server.listen(config.PORT, () => {
