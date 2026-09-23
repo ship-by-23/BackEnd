@@ -22,7 +22,8 @@ docker compose up postgres -d
 ```
 
 The API listens on `http://localhost:3000`. Health endpoints are available at
-`/health/live` and `/health/ready`.
+`/health/live` and `/health/ready`. The interactive API reference is at
+`/docs`, with its OpenAPI source at `/openapi.yaml`; both are public.
 
 Authentication endpoints are available under `/api/v1`:
 

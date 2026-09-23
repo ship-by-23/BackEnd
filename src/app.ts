@@ -1,6 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { apiReference } from "@scalar/express-api-reference";
 import cors from "cors";
-import express, { type Express, type Router } from "express";
+import express, {
+  type Express,
+  type Request,
+  type Response,
+  type Router,
+} from "express";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import type { Logger } from "pino";
@@ -71,6 +78,38 @@ export function createApp({
     } catch {
       response.status(503).json({ status: "unavailable" });
     }
+  });
+
+  app.get("/openapi.yaml", (_request, response) => {
+    response
+      .type("application/yaml")
+      .sendFile(
+        fileURLToPath(new URL("../docs/openapi.yaml", import.meta.url)),
+      );
+  });
+
+  app.get("/docs", (request, response, next) => {
+    const nonce = randomBytes(16).toString("base64");
+    response.setHeader(
+      "Content-Security-Policy",
+      [
+        "default-src 'self'",
+        `script-src 'nonce-${nonce}' https://cdn.jsdelivr.net`,
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self' data:",
+        "img-src 'self' data: https:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+      ].join("; "),
+    );
+    apiReference({
+      url: "/openapi.yaml",
+      cdn: "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.71.0",
+      nonce,
+      withDefaultFonts: false,
+    })(request as Request<never>, response as Response<string>, next);
   });
 
   if (apiRouter) app.use("/api/v1", apiRouter);

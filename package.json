@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "@scalar/express-api-reference": "^0.10.21",
     "@vercel/functions": "^3.9.9",
     "bcrypt": "^6.0.0",
     "cors": "2.8.6",

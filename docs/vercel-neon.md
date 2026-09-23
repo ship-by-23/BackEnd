@@ -7,6 +7,7 @@ US East region of the Neon database provisioned through Vercel Marketplace.
 Do not connect an existing database.
 
 Current API: `https://simpandulu-api.vercel.app`.
+Public interactive reference: `https://simpandulu-api.vercel.app/docs`.
 
 ## Setup
 
