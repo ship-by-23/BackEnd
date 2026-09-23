@@ -13,7 +13,9 @@ ENV NODE_ENV=production
 WORKDIR /app
 RUN addgroup -S nodejs && adduser -S simpandulu -G nodejs
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force \
+    && rm -r /usr/local/lib/node_modules/npm \
+    && rm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build --chown=simpandulu:nodejs /app/dist ./dist
 COPY --chown=simpandulu:nodejs drizzle ./drizzle
 USER simpandulu

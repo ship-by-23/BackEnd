@@ -1,4 +1,5 @@
 import pino from "pino";
+import { Writable } from "node:stream";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
@@ -29,6 +30,33 @@ const config: AppConfig = {
 const logger = pino({ level: "silent" });
 
 describe("health endpoints", () => {
+  it("logs request paths without query text or credentials", async () => {
+    const entries: string[] = [];
+    const sink = new Writable({
+      write(chunk: Buffer, _encoding, done) {
+        entries.push(chunk.toString());
+        done();
+      },
+    });
+    const app = createApp({
+      config,
+      logger: pino({ level: "info" }, sink),
+      checkDatabase: vi.fn(),
+    });
+    const response = await request(app)
+      .get("/health/live?url=private-article&token=private-token")
+      .set("Authorization", "Bearer private-access-token")
+      .set("Cookie", "session=private-cookie");
+
+    expect(response.status).toBe(200);
+    const output = entries.join("");
+    expect(output).toContain('"path":"/health/live"');
+    expect(output).not.toMatch(
+      /private-article|private-token|private-access-token|private-cookie/,
+    );
+    sink.destroy();
+  });
+
   it("reports that the process is alive", async () => {
     const app = createApp({ config, logger, checkDatabase: vi.fn() });
     const response = await request(app).get("/health/live");

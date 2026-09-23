@@ -75,6 +75,11 @@ session; bookmarklet source must not contain an access token or password.
 docker compose up --build
 ```
 
+The Compose file is for local development. Production configuration, migration,
+backup, rollback, and deterministic demo data are documented in
+[`docs/operations.md`](docs/operations.md). The API contract with request and
+response examples is in [`docs/openapi.yaml`](docs/openapi.yaml).
+
 ## Validation
 
 ```bash
